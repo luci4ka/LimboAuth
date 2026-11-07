@@ -21,7 +21,6 @@ import com.j256.ormlite.dao.Dao;
 import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.proxy.Player;
-import java.sql.SQLException;
 import java.util.Locale;
 import net.elytrium.commons.kyori.serialization.Serializer;
 import net.elytrium.limboauth.LimboAuth;
@@ -29,13 +28,15 @@ import net.elytrium.limboauth.Settings;
 import net.elytrium.limboauth.event.AuthUnregisterEvent;
 import net.elytrium.limboauth.handler.AuthSessionHandler;
 import net.elytrium.limboauth.model.RegisteredPlayer;
-import net.elytrium.limboauth.model.SQLRuntimeException;
+import net.elytrium.limboauth.service.PasswordService;
+import net.elytrium.limboauth.service.PlayerService;
 import net.kyori.adventure.text.Component;
 
 public class UnregisterCommand extends RatelimitedCommand {
 
   private final LimboAuth plugin;
   private final Dao<RegisteredPlayer, String> playerDao;
+  private final PlayerService playerService;
 
   private final String confirmKeyword;
   private final Component notPlayer;
@@ -49,6 +50,7 @@ public class UnregisterCommand extends RatelimitedCommand {
   public UnregisterCommand(LimboAuth plugin, Dao<RegisteredPlayer, String> playerDao) {
     this.plugin = plugin;
     this.playerDao = playerDao;
+    this.playerService = new PlayerService(plugin, playerDao);
 
     Serializer serializer = LimboAuth.getSerializer();
     this.confirmKeyword = Settings.IMP.MAIN.CONFIRM_KEYWORD;
@@ -73,15 +75,12 @@ public class UnregisterCommand extends RatelimitedCommand {
             source.sendMessage(this.notRegistered);
           } else if (player.getHash().isEmpty()) {
             source.sendMessage(this.crackedCommand);
-          } else if (AuthSessionHandler.checkPassword(args[0], player, this.playerDao)) {
-            try {
-              this.plugin.getServer().getEventManager().fireAndForget(new AuthUnregisterEvent(username));
-              this.playerDao.deleteById(usernameLowercase);
-              this.plugin.removePlayerFromCacheLowercased(usernameLowercase);
+          } else if (PasswordService.checkPassword(args[0], player, this.playerDao)) {
+            this.plugin.getServer().getEventManager().fireAndForget(new AuthUnregisterEvent(username));
+            if (this.playerService.unregister(username, usernameLowercase)) {
               ((Player) source).disconnect(this.successful);
-            } catch (SQLException e) {
+            } else {
               source.sendMessage(this.errorOccurred);
-              throw new SQLRuntimeException(e);
             }
           } else {
             source.sendMessage(this.wrongPassword);
@@ -100,6 +99,6 @@ public class UnregisterCommand extends RatelimitedCommand {
   @Override
   public boolean hasPermission(SimpleCommand.Invocation invocation) {
     return Settings.IMP.MAIN.COMMAND_PERMISSION_STATE.UNREGISTER
-        .hasPermission(invocation.source(), "limboauth.commands.unregister");
+            .hasPermission(invocation.source(), "limboauth.commands.unregister");
   }
 }

@@ -142,7 +142,7 @@ public class Settings extends YamlConfig {
     @Comment("Available dimensions: OVERWORLD, NETHER, THE_END")
     public Dimension DIMENSION = Dimension.THE_END;
     public long PURGE_CACHE_MILLIS = 3600000;
-    public long PURGE_PREMIUM_CACHE_MILLIS = 28800000;
+    public long PURGE_PREMIUM_CACHE_MILLIS = 72800000;
     public long PURGE_BRUTEFORCE_CACHE_MILLIS = 28800000;
     @Comment("Used to ban IPs when a possible attacker incorrectly enters the password")
     public int BRUTEFORCE_MAX_ATTEMPTS = 10;
@@ -240,6 +240,9 @@ public class Settings extends YamlConfig {
 
     @Create
     public Settings.MAIN.MOD MOD;
+
+    @Comment("Log auth flow (connection, successful login) for debugging")
+    public boolean DEBUG_AUTH = false;
 
     @Comment({
         "Implement the automatic login using the plugin, the LimboAuth client mod and optionally using a custom launcher",

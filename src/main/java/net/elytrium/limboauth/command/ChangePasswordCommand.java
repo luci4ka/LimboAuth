@@ -18,7 +18,6 @@
 package net.elytrium.limboauth.command;
 
 import com.j256.ormlite.dao.Dao;
-import com.j256.ormlite.stmt.UpdateBuilder;
 import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.proxy.Player;
@@ -31,12 +30,15 @@ import net.elytrium.limboauth.event.ChangePasswordEvent;
 import net.elytrium.limboauth.handler.AuthSessionHandler;
 import net.elytrium.limboauth.model.RegisteredPlayer;
 import net.elytrium.limboauth.model.SQLRuntimeException;
+import net.elytrium.limboauth.service.PasswordService;
+import net.elytrium.limboauth.service.PlayerService;
 import net.kyori.adventure.text.Component;
 
 public class ChangePasswordCommand extends RatelimitedCommand {
 
   private final LimboAuth plugin;
   private final Dao<RegisteredPlayer, String> playerDao;
+  private final PlayerService playerService;
 
   private final boolean needOldPass;
   private final Component notRegistered;
@@ -49,6 +51,7 @@ public class ChangePasswordCommand extends RatelimitedCommand {
   public ChangePasswordCommand(LimboAuth plugin, Dao<RegisteredPlayer, String> playerDao) {
     this.plugin = plugin;
     this.playerDao = playerDao;
+    this.playerService = new PlayerService(plugin, playerDao);
 
     Serializer serializer = LimboAuth.getSerializer();
     this.needOldPass = Settings.IMP.MAIN.CHANGE_PASSWORD_NEED_OLD_PASSWORD;
@@ -79,7 +82,7 @@ public class ChangePasswordCommand extends RatelimitedCommand {
           return;
         }
 
-        if (!AuthSessionHandler.checkPassword(args[0], player, this.playerDao)) {
+        if (!PasswordService.checkPassword(args[0], player, this.playerDao)) {
           source.sendMessage(this.wrongPassword);
           return;
         }
@@ -89,19 +92,13 @@ public class ChangePasswordCommand extends RatelimitedCommand {
       }
 
       try {
-        final String oldHash = player.getHash();
         final String newPassword = needOldPass ? args[1] : args[0];
-        final String newHash = RegisteredPlayer.genHash(newPassword);
+        final String newHash = PasswordService.genHash(newPassword);
 
-        UpdateBuilder<RegisteredPlayer, String> updateBuilder = this.playerDao.updateBuilder();
-        updateBuilder.where().eq(RegisteredPlayer.LOWERCASE_NICKNAME_FIELD, usernameLowercase);
-        updateBuilder.updateColumnValue(RegisteredPlayer.HASH_FIELD, newHash);
-        updateBuilder.update();
-
-        this.plugin.removePlayerFromCacheLowercased(usernameLowercase);
+        final String oldHash = this.playerService.updatePasswordHash(usernameLowercase, newHash);
 
         this.plugin.getServer().getEventManager().fireAndForget(
-            new ChangePasswordEvent(player, needOldPass ? args[0] : null, oldHash, newPassword, newHash));
+                new ChangePasswordEvent(player, needOldPass ? args[0] : null, oldHash, newPassword, newHash));
 
         source.sendMessage(this.successful);
       } catch (SQLException e) {
@@ -116,6 +113,6 @@ public class ChangePasswordCommand extends RatelimitedCommand {
   @Override
   public boolean hasPermission(SimpleCommand.Invocation invocation) {
     return Settings.IMP.MAIN.COMMAND_PERMISSION_STATE.CHANGE_PASSWORD
-        .hasPermission(invocation.source(), "limboauth.commands.changepassword");
+            .hasPermission(invocation.source(), "limboauth.commands.changepassword");
   }
 }

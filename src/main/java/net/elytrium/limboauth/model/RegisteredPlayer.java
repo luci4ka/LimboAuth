@@ -25,6 +25,7 @@ import java.net.InetSocketAddress;
 import java.util.Locale;
 import java.util.UUID;
 import net.elytrium.limboauth.Settings;
+import net.elytrium.limboauth.service.PasswordService;
 
 @DatabaseTable(tableName = "AUTH")
 public class RegisteredPlayer {
@@ -131,7 +132,7 @@ public class RegisteredPlayer {
   }
 
   public RegisteredPlayer setPassword(String password) {
-    this.hash = genHash(password);
+    this.hash = PasswordService.genHash(password);
     this.tokenIssuedAt = System.currentTimeMillis();
 
     return this;

@@ -29,6 +29,7 @@ import net.elytrium.limboauth.Settings;
 import net.elytrium.limboauth.handler.AuthSessionHandler;
 import net.elytrium.limboauth.model.RegisteredPlayer;
 import net.elytrium.limboauth.model.SQLRuntimeException;
+import net.elytrium.limboauth.service.PasswordService;
 import net.kyori.adventure.text.Component;
 
 public class PremiumCommand extends RatelimitedCommand {
@@ -73,7 +74,7 @@ public class PremiumCommand extends RatelimitedCommand {
             source.sendMessage(this.notRegistered);
           } else if (player.getHash().isEmpty()) {
             source.sendMessage(this.alreadyPremium);
-          } else if (AuthSessionHandler.checkPassword(args[0], player, this.playerDao)) {
+          } else if (PasswordService.checkPassword(args[0], player, this.playerDao)) {
             if (this.plugin.isPremiumExternal(usernameLowercase).getState() == LimboAuth.PremiumState.PREMIUM_USERNAME) {
               try {
                 player.setHash("");

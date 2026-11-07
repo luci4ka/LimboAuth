@@ -26,6 +26,7 @@ import com.velocitypowered.api.event.connection.PreLoginEvent;
 import com.velocitypowered.api.event.connection.PreLoginEvent.PreLoginComponentResult;
 import com.velocitypowered.api.event.player.GameProfileRequestEvent;
 import com.velocitypowered.api.proxy.InboundConnection;
+import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.util.UuidUtils;
 import com.velocitypowered.proxy.connection.MinecraftConnection;
 import com.velocitypowered.proxy.connection.client.InitialInboundConnection;
@@ -47,10 +48,12 @@ import net.elytrium.limboauth.handler.AuthSessionHandler;
 import net.elytrium.limboauth.model.RegisteredPlayer;
 import net.elytrium.limboauth.model.SQLRuntimeException;
 import net.kyori.adventure.text.Component;
+import org.jetbrains.annotations.Nullable;
 
 // TODO: Customizable events priority
 public class AuthListener {
 
+  @Nullable
   private static final MethodHandle DELEGATE_FIELD;
   //private static final MethodHandle LOGIN_FIELD;
 
@@ -84,14 +87,15 @@ public class AuthListener {
             if (!Settings.IMP.MAIN.ONLINE_MODE_NEED_AUTH_STRICT) {
               CachedPremiumUser premiumUser = this.plugin.getPremiumCache(username);
               MinecraftConnection connection = this.getConnection(event.getConnection());
-              if (!connection.isClosed() && premiumUser != null && !premiumUser.isForcePremium()
+              if (connection != null && !connection.isClosed() && premiumUser != null && !premiumUser.isForcePremium()
                   && this.plugin.isPremiumInternal(username.toLowerCase(Locale.ROOT)).getState() == PremiumState.UNKNOWN) {
-                this.plugin.getPendingLogins().add(username);
+                this.plugin.getPendingLogins().put(username, Boolean.TRUE);
 
                 // As Velocity doesnt have any events for our usecase, just inject into netty
                 connection.getChannel().closeFuture().addListener(future -> {
                   // Player has failed premium verfication client-side, mark as offline-mode
-                  if (this.plugin.getPendingLogins().remove(username)) {
+                  if (this.plugin.getPendingLogins().getIfPresent(username) != null) {
+                    this.plugin.getPendingLogins().invalidate(username);
                     this.plugin.setPremiumCacheLowercased(username.toLowerCase(Locale.ROOT), false);
                   }
                 });
@@ -106,7 +110,7 @@ public class AuthListener {
       } else {
         try {
           MinecraftConnection connection = this.getConnection(event.getConnection());
-          if (!connection.isClosed()) {
+          if (connection != null && !connection.isClosed()) {
             this.plugin.saveForceOfflineMode(username);
 
             // As Velocity doesnt have any events for our usecase, just inject into netty
@@ -124,7 +128,11 @@ public class AuthListener {
     }
   }
 
+  @Nullable
   private MinecraftConnection getConnection(InboundConnection inbound) throws Throwable {
+    if (DELEGATE_FIELD == null) {
+      return null;
+    }
     LoginInboundConnection inboundConnection = (LoginInboundConnection) inbound;
     InitialInboundConnection initialInbound = (InitialInboundConnection) DELEGATE_FIELD.invokeExact(inboundConnection);
     return initialInbound.getConnection();
@@ -155,7 +163,10 @@ public class AuthListener {
   @Subscribe
   public void onPostLogin(PostLoginEvent event) {
     UUID uuid = event.getPlayer().getUniqueId();
-    Runnable postLoginTask = this.plugin.getPostLoginTasks().remove(uuid);
+    Runnable postLoginTask = this.plugin.getPostLoginTasks().getIfPresent(uuid);
+    if (postLoginTask != null) {
+      this.plugin.getPostLoginTasks().invalidate(uuid);
+    }
     if (postLoginTask != null) {
       // We need to delay for player's client to finish switching the server, it takes a little time.
       this.plugin.getServer().getScheduler()
@@ -163,6 +174,11 @@ public class AuthListener {
           .delay(Settings.IMP.MAIN.PREMIUM_AND_FLOODGATE_MESSAGES_DELAY, TimeUnit.MILLISECONDS)
           .schedule();
     }
+  }
+
+  @Subscribe
+  public void onDisconnect(DisconnectEvent event) {
+    this.plugin.removePostLoginTask(event.getPlayer().getUniqueId());
   }
 
   @Subscribe
@@ -174,7 +190,7 @@ public class AuthListener {
         premiumUser.setForcePremium(true);
       }
 
-      this.plugin.getPendingLogins().remove(event.getPlayer().getUsername());
+      this.plugin.getPendingLogins().invalidate(event.getPlayer().getUsername());
     }
 
     if (this.plugin.needAuth(event.getPlayer())) {
@@ -232,13 +248,17 @@ public class AuthListener {
   }
 
   static {
+    MethodHandle handle = null;
     try {
-      DELEGATE_FIELD = MethodHandles.privateLookupIn(LoginInboundConnection.class, MethodHandles.lookup())
-          .findGetter(LoginInboundConnection.class, "delegate", InitialInboundConnection.class);
-      //LOGIN_FIELD = MethodHandles.privateLookupIn(InitialLoginSessionHandler.class, MethodHandles.lookup())
-      //    .findGetter(InitialLoginSessionHandler.class, "login",ServerLoginPacket.class);
+      handle = MethodHandles.privateLookupIn(LoginInboundConnection.class, MethodHandles.lookup())
+              .findGetter(LoginInboundConnection.class, "delegate", InitialInboundConnection.class);
     } catch (NoSuchFieldException | IllegalAccessException e) {
-      throw new ReflectionException(e);
+      LimboAuth.getLogger().warn(
+              "Unable to access LoginInboundConnection#delegate via reflection. "
+                      + "Force-offline tracking will be disabled. This is expected on newer Velocity versions.",
+              e
+      );
     }
+    DELEGATE_FIELD = handle;
   }
 }

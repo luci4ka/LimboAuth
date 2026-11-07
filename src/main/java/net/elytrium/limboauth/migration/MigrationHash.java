@@ -89,6 +89,24 @@ public enum MigrationHash {
     this.verifier = verifier;
   }
 
+
+  /**
+   * Быстрая структурная проверка: похож ли хеш на формат этого алгоритма.
+   * Нужна, чтобы не гонять дорогую проверку миграции для заведомо чужих хешей.
+   */
+  public boolean looksLike(String hash) {
+    if (hash == null || hash.isEmpty()) {
+      return false;
+    }
+    return switch (this) {
+      case AUTHME, SHA512_P, SHA256_P, SHA512_P_REVERSED_HASH, SHA512_NLOGIN, MOON_SHA256,
+           SHA256_NO_SALT, SHA512_NO_SALT -> hash.startsWith("$");
+      case AUTHME_NP, SHA512_DBA, SHA512_NP, SHA256_NP -> hash.startsWith("SHA$");
+      case ARGON2 -> hash.startsWith("$argon2");
+      case MD5, CRC32C, PLAINTEXT -> true; // нет явного префикса — проверяем всегда
+    };
+  }
+
   public boolean checkPassword(String hash, String password) {
     return this.verifier.checkPassword(hash, password);
   }

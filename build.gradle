@@ -3,18 +3,17 @@
 plugins {
     id("java")
     id("checkstyle")
-    id("maven-publish")
     id("com.github.spotbugs").version("6.1.7")
-    id("org.cadixdev.licenser").version("0.6.1")
-    id("com.gradleup.shadow").version("8.3.6")
+    id("net.minecraftforge.licenser").version("1.2.0")
+    id("com.gradleup.shadow").version("9.3.0")
 }
 
 setGroup("net.elytrium")
 setVersion("1.1.14")
 
 java {
-    setSourceCompatibility(JavaVersion.VERSION_17)
-    setTargetCompatibility(JavaVersion.VERSION_17)
+    setSourceCompatibility(JavaVersion.VERSION_25)
+    setTargetCompatibility(JavaVersion.VERSION_25)
 }
 
 compileJava {
@@ -67,6 +66,7 @@ dependencies {
     implementation("dev.samstevens.totp:totp:1.7.1")
 
     implementation("com.j256.ormlite:ormlite-jdbc:6.1")
+    implementation("com.github.ben-manes.caffeine:caffeine:3.1.8")
     implementation("de.mkammerer:argon2-jvm-nolibs:2.11")
 
     implementation("io.whitfin:siphash:2.0.0")
@@ -111,7 +111,8 @@ shadowJar {
     exclude("org/checkerframework/**")
     exclude("**/package-info.class")
 
-    minimize()
+    // minimize() убран — ORMLite, JNA, Argon2 и TOTP используют рефлексию/нативные методы,
+    // minimize() может вырезать нужные классы и сломать рантайм.
 
     relocate("at.favre.lib", "net.elytrium.limboauth.thirdparty.at.favre.lib")
     relocate("com.j256.ormlite", "net.elytrium.limboauth.thirdparty.com.j256.ormlite")
@@ -125,6 +126,7 @@ shadowJar {
     relocate("net.elytrium.commons.velocity", "net.elytrium.limboapi.thirdparty.commons.velocity")
     relocate("net.elytrium.commons.kyori", "net.elytrium.limboapi.thirdparty.commons.kyori")
     relocate("net.elytrium.commons.config", "net.elytrium.limboapi.thirdparty.commons.config")
+    // Caffeine НЕ relocate'ить — использует ServiceLoader и рефлексию.
 }
 
 license {
@@ -132,7 +134,7 @@ license {
 }
 
 checkstyle {
-    setToolVersion("10.1")
+    setToolVersion("10.21")
     setConfigFile(file("${this.getRootDir()}/config/checkstyle/checkstyle.xml"))
     setConfigProperties("configDirectory": "${this.getRootDir()}/config/checkstyle")
 
@@ -148,37 +150,15 @@ spotbugsMain {
     reports {
         html {
             getRequired().set(true)
-            getOutputLocation().set(file("${this.getBuildDir()}/reports/spotbugs/main/spotbugs.html"))
+            getOutputLocation().set(layout.buildDirectory.file("reports/spotbugs/main/spotbugs.html").get().asFile)
             setStylesheet("fancy-hist.xsl")
         }
     }
 }
 
-task sourcesJar(type: Jar) {
-    getArchiveClassifier().set("sources")
-    from(sourceSets.main.getAllSource())
-}
-
-publishing {
-    repositories {
-        maven {
-            credentials {
-                setUsername(System.getenv("PUBLISH_USERNAME"))
-                setPassword(System.getenv("PUBLISH_PASSWORD"))
-            }
-
-            setName("elytrium-repo")
-            setUrl("https://maven.elytrium.net/repo/")
-        }
-    }
-
-    publications {
-        maven(MavenPublication) {
-            from(getComponents().java)
-
-            artifact(sourcesJar)
-        }
-    }
+tasks.register('sourcesJar', Jar) {
+    archiveClassifier.set('sources')
+    from sourceSets.main.allSource
 }
 
 javadoc {
@@ -194,7 +174,7 @@ javadoc {
 }
 
 artifacts {
-    archives(sourcesJar)
+    archives(tasks.named('sourcesJar'))
 }
 
 sourceSets.main.getJava().srcDir(
@@ -213,16 +193,14 @@ sourceSets.main.getJava().srcDir(
 assemble.dependsOn(shadowJar)
 
 String getCurrentShortRevision() {
-    OutputStream outputStream = new ByteArrayOutputStream()
-    exec {
+    def outputStream = new ByteArrayOutputStream()
+    providers.exec {
         if (System.getProperty("os.name").toLowerCase().contains("win")) {
             commandLine("cmd", "/c", "git rev-parse --short HEAD")
         } else {
             commandLine("bash", "-c", "git rev-parse --short HEAD")
         }
-
-        setStandardOutput(outputStream)
-    }
-
+        standardOutput = outputStream
+    }.result.get()
     return outputStream.toString().trim()
 }

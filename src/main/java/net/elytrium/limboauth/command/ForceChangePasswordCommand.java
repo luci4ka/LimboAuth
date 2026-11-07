@@ -18,7 +18,6 @@
 package net.elytrium.limboauth.command;
 
 import com.j256.ormlite.dao.Dao;
-import com.j256.ormlite.stmt.UpdateBuilder;
 import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.proxy.ProxyServer;
@@ -34,6 +33,8 @@ import net.elytrium.limboauth.event.ChangePasswordEvent;
 import net.elytrium.limboauth.handler.AuthSessionHandler;
 import net.elytrium.limboauth.model.RegisteredPlayer;
 import net.elytrium.limboauth.model.SQLRuntimeException;
+import net.elytrium.limboauth.service.PasswordService;
+import net.elytrium.limboauth.service.PlayerService;
 import net.kyori.adventure.text.Component;
 
 public class ForceChangePasswordCommand extends RatelimitedCommand {
@@ -41,6 +42,7 @@ public class ForceChangePasswordCommand extends RatelimitedCommand {
   private final LimboAuth plugin;
   private final ProxyServer server;
   private final Dao<RegisteredPlayer, String> playerDao;
+  private final PlayerService playerService;
 
   private final String message;
   private final String successful;
@@ -52,6 +54,7 @@ public class ForceChangePasswordCommand extends RatelimitedCommand {
     this.plugin = plugin;
     this.server = server;
     this.playerDao = playerDao;
+    this.playerService = new PlayerService(plugin, playerDao);
 
     this.message = Settings.IMP.MAIN.STRINGS.FORCE_CHANGE_PASSWORD_MESSAGE;
     this.successful = Settings.IMP.MAIN.STRINGS.FORCE_CHANGE_PASSWORD_SUCCESSFUL;
@@ -81,17 +84,11 @@ public class ForceChangePasswordCommand extends RatelimitedCommand {
           return;
         }
 
-        final String oldHash = registeredPlayer.getHash();
-        final String newHash = RegisteredPlayer.genHash(newPassword);
+        final String newHash = PasswordService.genHash(newPassword);
+        final String oldHash = this.playerService.updatePasswordHash(nicknameLowercased, newHash);
 
-        UpdateBuilder<RegisteredPlayer, String> updateBuilder = this.playerDao.updateBuilder();
-        updateBuilder.where().eq(RegisteredPlayer.LOWERCASE_NICKNAME_FIELD, nicknameLowercased);
-        updateBuilder.updateColumnValue(RegisteredPlayer.HASH_FIELD, newHash);
-        updateBuilder.update();
-
-        this.plugin.removePlayerFromCacheLowercased(nicknameLowercased);
         this.server.getPlayer(nickname)
-            .ifPresent(player -> player.sendMessage(serializer.deserialize(MessageFormat.format(this.message, newPassword))));
+                .ifPresent(player -> player.sendMessage(serializer.deserialize(MessageFormat.format(this.message, newPassword))));
 
         this.plugin.getServer().getEventManager().fireAndForget(new ChangePasswordEvent(registeredPlayer, null, oldHash, newPassword, newHash));
 
@@ -108,6 +105,6 @@ public class ForceChangePasswordCommand extends RatelimitedCommand {
   @Override
   public boolean hasPermission(SimpleCommand.Invocation invocation) {
     return Settings.IMP.MAIN.COMMAND_PERMISSION_STATE.FORCE_CHANGE_PASSWORD
-        .hasPermission(invocation.source(), "limboauth.admin.forcechangepassword");
+            .hasPermission(invocation.source(), "limboauth.admin.forcechangepassword");
   }
 }
